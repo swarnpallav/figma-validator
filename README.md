@@ -77,4 +77,9 @@ v1 — Initial release
 
 More features coming soon.
 
+---
 
+## 🏆 Status
+
+✔ Figma Plugin – Approved & Published  
+⏳ Chrome Extension – Under Review
