@@ -11,6 +11,13 @@ It helps reduce manual inspection time and ensures pixel-accurate implementation
 
 ---
 
+## 🏆 Status
+
+✔ Figma Plugin – Approved & Published  
+⏳ Chrome Extension – Under Review
+
+---
+
 ## 🚀 How it works
 
 1. Select an element in Figma using the plugin
@@ -76,10 +83,3 @@ Figma Validator automates this comparison in seconds.
 v1 — Initial release
 
 More features coming soon.
-
----
-
-## 🏆 Status
-
-✔ Figma Plugin – Approved & Published  
-⏳ Chrome Extension – Under Review
