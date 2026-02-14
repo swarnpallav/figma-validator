@@ -1,0 +1,27 @@
+<pre id="output">Select an element in Figma…</pre>
+
+<script>
+  window.onmessage = event => {
+    const msg = event.data.pluginMessage
+
+    if (msg.type === 'snapshot') {
+      const data = msg.data
+
+      window.top.postMessage(
+        {
+          source: 'figma-validator',
+          type: 'FIGMA_STYLE_SNAPSHOT',
+          payload: data
+        },
+        '*'
+      )
+
+      // show JSON in panel
+      document.getElementById('output').textContent = JSON.stringify(
+        data,
+        null,
+        2
+      )
+    }
+  }
+</script>
