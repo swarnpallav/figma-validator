@@ -11,10 +11,16 @@ It helps reduce manual inspection time and ensures pixel-accurate implementation
 
 ---
 
-## 🏆 Status
+## 🚀 Live
 
-✔ Figma Plugin – Approved & Published  
-⏳ Chrome Extension – Under Review
+- 🧩 Figma Plugin: Approved & Published
+- 🌐 Chrome Extension: Published (Unlisted)
+
+Chrome Extension Link:
+https://chromewebstore.google.com/detail/figma-validator/abckkojoejplbhaodfpebcaofokmmpjh?authuser=0&hl=en
+
+Figma Plugin Link:
+https://www.figma.com/community/plugin/1604167807144854725
 
 ---
 
