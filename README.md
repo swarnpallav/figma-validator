@@ -84,8 +84,8 @@ Figma Validator automates this comparison in seconds.
 
 ---
 
-## 📌 Status
+## Versions
 
-v1 — Initial release
+- v1.0.0 – Initial release
 
 More features coming soon.
