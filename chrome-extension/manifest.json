@@ -12,7 +12,7 @@
   "permissions": ["storage"],
   "content_scripts": [
     {
-      "js": ["scripts/content.js"],
+      "js": ["scripts/geometry-validator.js", "scripts/content.js"],
       "matches": ["https://www.figma.com/*", "<all_urls>"],
       "run_at": "document_idle"
     }

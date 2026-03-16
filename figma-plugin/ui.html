@@ -1,27 +1,50 @@
-<pre id="output">Select an element in Figma…</pre>
+<pre id="output">Select a container in Figma…</pre>
 
 <script>
+  function getSnapshotStats(node, depth = 0) {
+    return (node.children || []).reduce(
+      (stats, child) => {
+        const childStats = getSnapshotStats(child, depth + 1)
+
+        return {
+          totalNodes: stats.totalNodes + childStats.totalNodes,
+          maxDepth: Math.max(stats.maxDepth, childStats.maxDepth)
+        }
+      },
+      {
+        totalNodes: 1,
+        maxDepth: depth
+      }
+    )
+  }
+
+  function toPlainSnapshot(data) {
+    return JSON.parse(JSON.stringify(data))
+  }
+
   window.onmessage = event => {
     const msg = event.data.pluginMessage
 
     if (msg.type === 'snapshot') {
-      const data = msg.data
-
+      const data = toPlainSnapshot(msg.data)
+      const stats = getSnapshotStats(data)
       window.top.postMessage(
         {
           source: 'figma-validator',
-          type: 'FIGMA_STYLE_SNAPSHOT',
+          type: 'FIGMA_LAYOUT_SNAPSHOT',
           payload: data
         },
         '*'
       )
 
       // show JSON in panel
-      document.getElementById('output').textContent = JSON.stringify(
-        data,
-        null,
-        2
-      )
+      document.getElementById('output').textContent = [
+        `Root: ${data.nodeName} (${data.nodeId})`,
+        `Total nodes: ${stats.totalNodes}`,
+        `Max depth: ${stats.maxDepth}`,
+        '',
+        JSON.stringify(data, null, 2)
+      ].join('\n')
     }
   }
 </script>
