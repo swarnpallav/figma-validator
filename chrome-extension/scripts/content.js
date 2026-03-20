@@ -316,6 +316,118 @@ function createMetricRow(label, figmaValue, browserValue, isActive, comparisonVa
   return row
 }
 
+function formatStyleValue(value) {
+  if (value == null) return '--'
+  if (typeof value === 'number') return `${value}px`
+  if (typeof value === 'object' && 'r' in value) {
+    return `rgb(${value.r}, ${value.g}, ${value.b})`
+  }
+  return String(value)
+}
+
+function createStyleDetails(result) {
+  const wrapper = document.createElement('details')
+  wrapper.style.marginTop = '10px'
+  wrapper.style.borderTop = '1px solid rgba(255,255,255,0.08)'
+  wrapper.style.paddingTop = '8px'
+
+  const summary = document.createElement('summary')
+  summary.textContent = 'Style details'
+  summary.style.cursor = 'pointer'
+  summary.style.fontSize = '11px'
+  summary.style.fontWeight = '700'
+  summary.style.opacity = '0.88'
+  wrapper.appendChild(summary)
+
+  const body = document.createElement('div')
+  body.style.marginTop = '8px'
+  body.style.display = 'grid'
+  body.style.gap = '8px'
+
+  if (result.mappingStatus === 'unmatched') {
+    const note = document.createElement('div')
+    note.textContent =
+      'Style details unavailable: no trusted DOM mapping. Figma styles shown below.'
+    note.style.fontSize = '11px'
+    note.style.color = '#fcd34d'
+    body.appendChild(note)
+  }
+
+  const source =
+    result.mappingStatus === 'matched' ? result.styleComparison : { figma: result.figmaStyles }
+  const groups = source?.figma || {}
+
+  Object.entries(groups).forEach(([groupKey, groupValues]) => {
+    const properties = Object.entries(groupValues || {}).filter(([, value]) => value != null)
+    if (properties.length === 0) return
+
+    const section = document.createElement('div')
+    section.style.display = 'grid'
+    section.style.gap = '4px'
+
+    const heading = document.createElement('div')
+    heading.textContent = groupKey
+    heading.style.fontSize = '11px'
+    heading.style.fontWeight = '700'
+    heading.style.opacity = '0.82'
+    section.appendChild(heading)
+
+    properties.forEach(([propertyKey, figmaValue]) => {
+      const row = document.createElement('div')
+      row.style.display = 'grid'
+      row.style.gridTemplateColumns =
+        result.mappingStatus === 'matched' ? '88px 1fr 1fr 42px' : '88px 1fr'
+      row.style.gap = '8px'
+      row.style.fontSize = '11px'
+      row.style.opacity = '0.86'
+
+      const property = document.createElement('div')
+      property.textContent = propertyKey
+      property.style.opacity = '0.7'
+      row.appendChild(property)
+
+      const figma = document.createElement('div')
+      figma.textContent = formatStyleValue(figmaValue)
+      figma.style.color = '#fde68a'
+      row.appendChild(figma)
+
+      if (result.mappingStatus === 'matched') {
+        const browserValue = source.browser?.[groupKey]?.[propertyKey]
+        const diff = source.diffs?.[groupKey]?.[propertyKey]
+
+        const browser = document.createElement('div')
+        browser.textContent = formatStyleValue(browserValue)
+        browser.style.color = '#bfdbfe'
+        row.appendChild(browser)
+
+        const status = document.createElement('div')
+        status.textContent = diff ? 'Diff' : 'Match'
+        status.style.color = diff ? '#fca5a5' : '#86efac'
+        status.style.textAlign = 'right'
+        row.appendChild(status)
+      }
+
+      section.appendChild(row)
+    })
+
+    body.appendChild(section)
+  })
+
+  if (!body.children.length) {
+    const empty = document.createElement('div')
+    empty.textContent =
+      result.mappingStatus === 'matched'
+        ? 'No Figma style properties available for this node.'
+        : 'No Figma style properties available for this unmatched node.'
+    empty.style.fontSize = '11px'
+    empty.style.opacity = '0.7'
+    body.appendChild(empty)
+  }
+
+  wrapper.appendChild(body)
+  return wrapper
+}
+
 function buildValidationEntries(validation) {
   const rows = []
   let index = 0
@@ -478,6 +590,10 @@ function createResultCard(entry) {
     )
   )
 
+  if (result.status !== 'match') {
+    card.appendChild(createStyleDetails(result))
+  }
+
   return card
 }
 
@@ -594,7 +710,7 @@ function renderOverlay(validation) {
   container.style.top = '16px'
   container.style.right = '16px'
   container.style.zIndex = '999999'
-  container.style.width = '420px'
+  container.style.width = '460px'
   container.style.maxHeight = '75vh'
   container.style.overflow = 'auto'
   container.style.padding = '14px'
@@ -616,7 +732,7 @@ function renderOverlay(validation) {
   title.textContent = 'Figma Layout Validator'
 
   const subtitle = document.createElement('div')
-  subtitle.textContent = 'Visual geometry comparison'
+  subtitle.textContent = 'Visual geometry comparison with style diagnostics'
   subtitle.style.fontSize = '11px'
   subtitle.style.opacity = '0.7'
 

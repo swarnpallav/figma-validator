@@ -36,6 +36,21 @@
     return { x, y, width, height }
   }
 
+  function normalizeCssNumber(value) {
+    const parsed = parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  function cssRgbToObject(value) {
+    if (!value) return null
+
+    const matches = value.match(/\d+/g)
+    if (!matches || matches.length < 3) return null
+
+    const [r, g, b] = matches.slice(0, 3).map(Number)
+    return { r, g, b }
+  }
+
   function toRelativeBounds(bounds, containerBounds) {
     return {
       x: bounds.x - containerBounds.x,
@@ -168,6 +183,16 @@
     return Math.abs(figmaValue - browserValue) <= tolerance
   }
 
+  function compareColor(figmaColor, browserColor, tolerance = 1) {
+    if (!figmaColor || !browserColor) return false
+
+    return (
+      Math.abs(figmaColor.r - browserColor.r) <= tolerance &&
+      Math.abs(figmaColor.g - browserColor.g) <= tolerance &&
+      Math.abs(figmaColor.b - browserColor.b) <= tolerance
+    )
+  }
+
   function boundsRoughlyEqual(firstBounds, secondBounds, tolerance) {
     if (!firstBounds || !secondBounds) return false
 
@@ -256,7 +281,13 @@
     return reasons
   }
 
-  function filterEligibleCandidates(figmaNode, candidatePool, figmaRootBounds, domRootBounds, preferredParentElement) {
+  function filterEligibleCandidates(
+    figmaNode,
+    candidatePool,
+    figmaRootBounds,
+    domRootBounds,
+    preferredParentElement
+  ) {
     const figmaRelativeBounds = toRelativeBounds(figmaNode.bounds, figmaRootBounds)
     const figmaProjectedBounds = toAbsoluteBounds(figmaRelativeBounds, domRootBounds)
     const thresholds = ELIGIBILITY_THRESHOLDS
@@ -313,7 +344,135 @@
     return bestMatch
   }
 
-  function createValidationResult(figmaNode, browserNode, tolerance, mappingStatus, debug) {
+  function getBrowserStyleSnapshot(element) {
+    const computedStyles = window.getComputedStyle(element)
+
+    return {
+      typography: {
+        fontSize: normalizeCssNumber(computedStyles.fontSize),
+        fontWeight: normalizeCssNumber(computedStyles.fontWeight),
+        lineHeight: normalizeCssNumber(computedStyles.lineHeight)
+      },
+      colors: {
+        text: cssRgbToObject(computedStyles.color),
+        background: cssRgbToObject(computedStyles.backgroundColor)
+      },
+      border: {
+        radius: normalizeCssNumber(computedStyles.borderRadius)
+      },
+      spacing: {
+        paddingTop: normalizeCssNumber(computedStyles.paddingTop),
+        paddingRight: normalizeCssNumber(computedStyles.paddingRight),
+        paddingBottom: normalizeCssNumber(computedStyles.paddingBottom),
+        paddingLeft: normalizeCssNumber(computedStyles.paddingLeft)
+      }
+    }
+  }
+
+  function buildStyleComparison(figmaStyles, browserStyles) {
+    if (!figmaStyles) return null
+
+    const comparison = {
+      figma: figmaStyles,
+      browser: {},
+      diffs: {}
+    }
+
+    function recordNumeric(groupKey, propertyKey, figmaValue, browserValue) {
+      if (figmaValue == null) return
+
+      if (!comparison.browser[groupKey]) comparison.browser[groupKey] = {}
+      if (!comparison.diffs[groupKey]) comparison.diffs[groupKey] = {}
+
+      comparison.browser[groupKey][propertyKey] = browserValue
+      comparison.diffs[groupKey][propertyKey] = !compareDimension(
+        figmaValue,
+        browserValue,
+        0.5
+      )
+    }
+
+    function recordColor(groupKey, propertyKey, figmaValue, browserValue) {
+      if (!figmaValue) return
+
+      if (!comparison.browser[groupKey]) comparison.browser[groupKey] = {}
+      if (!comparison.diffs[groupKey]) comparison.diffs[groupKey] = {}
+
+      comparison.browser[groupKey][propertyKey] = browserValue
+      comparison.diffs[groupKey][propertyKey] = !compareColor(
+        figmaValue,
+        browserValue
+      )
+    }
+
+    if (figmaStyles.typography) {
+      recordNumeric(
+        'typography',
+        'fontSize',
+        figmaStyles.typography.fontSize,
+        browserStyles.typography?.fontSize
+      )
+      recordNumeric(
+        'typography',
+        'fontWeight',
+        figmaStyles.typography.fontWeight,
+        browserStyles.typography?.fontWeight
+      )
+      recordNumeric(
+        'typography',
+        'lineHeight',
+        figmaStyles.typography.lineHeight,
+        browserStyles.typography?.lineHeight
+      )
+    }
+
+    if (figmaStyles.colors) {
+      recordColor(
+        'colors',
+        'text',
+        figmaStyles.colors.text,
+        browserStyles.colors?.text
+      )
+      recordColor(
+        'colors',
+        'background',
+        figmaStyles.colors.background,
+        browserStyles.colors?.background
+      )
+    }
+
+    if (figmaStyles.border) {
+      recordNumeric(
+        'border',
+        'radius',
+        figmaStyles.border.radius,
+        browserStyles.border?.radius
+      )
+    }
+
+    if (figmaStyles.spacing) {
+      ;['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].forEach(
+        propertyKey => {
+          recordNumeric(
+            'spacing',
+            propertyKey,
+            figmaStyles.spacing[propertyKey],
+            browserStyles.spacing?.[propertyKey]
+          )
+        }
+      )
+    }
+
+    return comparison
+  }
+
+  function createValidationResult(
+    figmaNode,
+    browserNode,
+    tolerance,
+    mappingStatus,
+    debug
+  ) {
     const figmaWidth = figmaNode.bounds.width
     const figmaHeight = figmaNode.bounds.height
     const browserWidth = browserNode?.bounds.width ?? null
@@ -341,6 +500,8 @@
         width: widthMatches,
         height: heightMatches
       },
+      figmaStyles: figmaNode.styles || null,
+      styleComparison: null,
       mappingStatus,
       status:
         mappingStatus === 'matched' && widthMatches && heightMatches
@@ -362,6 +523,32 @@
       depth,
       kind
     }
+  }
+
+  function enrichStyleComparisons(validationResult, matchEntries) {
+    let matchIndex = 0
+
+    function walk(result) {
+      const matchEntry = matchEntries[matchIndex] || null
+      matchIndex += 1
+
+      if (
+        result.mappingStatus === 'matched' &&
+        result.status === 'mismatch' &&
+        matchEntry?.element &&
+        result.figmaStyles
+      ) {
+        result.styleComparison = buildStyleComparison(
+          result.figmaStyles,
+          getBrowserStyleSnapshot(matchEntry.element)
+        )
+      }
+
+      result.children.forEach(child => walk(child))
+      return result
+    }
+
+    return walk(validationResult)
   }
 
   function validateNode(figmaNode, browserNode, options) {
@@ -497,6 +684,8 @@
         unmatchedDomNodes
       }
     )
+
+    enrichStyleComparisons(validation.result, validation.flatMatches)
 
     return {
       result: validation.result,

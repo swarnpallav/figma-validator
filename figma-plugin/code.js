@@ -6,6 +6,80 @@ function getNodeBounds(node) {
     const { x, y, width, height } = node.absoluteBoundingBox;
     return { x, y, width, height };
 }
+function toRgbColor(color) {
+    return {
+        r: Math.round(color.r * 255),
+        g: Math.round(color.g * 255),
+        b: Math.round(color.b * 255)
+    };
+}
+function getSolidFillColor(node) {
+    if (!('fills' in node) || !Array.isArray(node.fills) || node.fills.length === 0) {
+        return null;
+    }
+    const solidFill = node.fills.find(fill => fill.type === 'SOLID' && fill.visible !== false);
+    if (!solidFill || solidFill.type !== 'SOLID')
+        return null;
+    return toRgbColor(solidFill.color);
+}
+function getTypographyStyles(node) {
+    if (node.type !== 'TEXT')
+        return undefined;
+    const lineHeightValue = typeof node.lineHeight === 'object' && 'value' in node.lineHeight
+        ? node.lineHeight.value
+        : typeof node.lineHeight === 'number'
+            ? node.lineHeight
+            : null;
+    return {
+        fontSize: typeof node.fontSize === 'number' ? node.fontSize : null,
+        fontWeight: typeof node.fontWeight === 'number' ? node.fontWeight : null,
+        lineHeight: lineHeightValue
+    };
+}
+function getSpacingStyles(node) {
+    var _a, _b, _c, _d;
+    if (!('paddingTop' in node))
+        return undefined;
+    return {
+        paddingTop: (_a = node.paddingTop) !== null && _a !== void 0 ? _a : null,
+        paddingRight: (_b = node.paddingRight) !== null && _b !== void 0 ? _b : null,
+        paddingBottom: (_c = node.paddingBottom) !== null && _c !== void 0 ? _c : null,
+        paddingLeft: (_d = node.paddingLeft) !== null && _d !== void 0 ? _d : null
+    };
+}
+function getBorderStyles(node) {
+    if (!('cornerRadius' in node))
+        return undefined;
+    return {
+        radius: typeof node.cornerRadius === 'number' ? node.cornerRadius : null
+    };
+}
+function getColorStyles(node) {
+    const background = getSolidFillColor(node);
+    const text = node.type === 'TEXT' ? getSolidFillColor(node) : null;
+    if (!background && !text)
+        return undefined;
+    return {
+        text,
+        background
+    };
+}
+function getNodeStyles(node) {
+    const typography = getTypographyStyles(node);
+    const spacing = getSpacingStyles(node);
+    const border = getBorderStyles(node);
+    const colors = getColorStyles(node);
+    const styles = {};
+    if (typography)
+        styles.typography = typography;
+    if (spacing)
+        styles.spacing = spacing;
+    if (border)
+        styles.border = border;
+    if (colors)
+        styles.colors = colors;
+    return Object.keys(styles).length > 0 ? styles : undefined;
+}
 function isVisualNode(node) {
     if (!node.visible)
         return false;
@@ -28,6 +102,7 @@ function toSnapshotNode(node) {
         nodeType: node.type,
         bounds,
         visible: node.visible,
+        styles: getNodeStyles(node),
         children: []
     };
 }
