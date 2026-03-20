@@ -273,7 +273,339 @@ function scheduleAnnotationPositionUpdate() {
   })
 }
 
-function createMetricRow(label, figmaValue, browserValue, isActive, comparisonValue, mappingStatus) {
+function formatPixelValue(value, options = {}) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--'
+
+  const rounded = Math.round(value * 100) / 100
+  const absoluteValue = Math.abs(rounded)
+  const numericText = Number.isInteger(absoluteValue)
+    ? String(absoluteValue)
+    : absoluteValue.toFixed(2).replace(/\.?0+$/, '')
+
+  if (options.signed) {
+    const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : ''
+    return `${sign}${numericText}px`
+  }
+
+  return `${rounded}px`
+}
+
+function getGeometryDelta(figmaValue, browserValue) {
+  if (typeof figmaValue !== 'number' || typeof browserValue !== 'number') {
+    return null
+  }
+
+  return browserValue - figmaValue
+}
+
+function createInsightSection(titleText, bodyText, accentColor) {
+  const section = document.createElement('div')
+  section.style.marginTop = '10px'
+  section.style.padding = '9px 10px'
+  section.style.borderRadius = '10px'
+  section.style.background = 'rgba(255,255,255,0.04)'
+  section.style.border = `1px solid ${accentColor}`
+
+  const title = document.createElement('div')
+  title.textContent = titleText
+  title.style.fontSize = '11px'
+  title.style.fontWeight = '700'
+  title.style.color = accentColor
+  title.style.marginBottom = '3px'
+
+  const body = document.createElement('div')
+  body.textContent = bodyText
+  body.style.fontSize = '11px'
+  body.style.opacity = '0.86'
+
+  section.appendChild(title)
+  section.appendChild(body)
+  return section
+}
+
+const GEOMETRY_INSIGHT_RULES = {
+  combined: {
+    issue: [
+      'Element differs from Figma in both width ({widthAmount}) and height ({heightAmount}). Parent or container sizing constraints likely differ from the design.{contextIssue}',
+      'Width ({widthAmount}) and height ({heightAmount}) are both off, which usually points to a container-level sizing mismatch.{contextIssue}',
+      'This element is misaligned in both dimensions: width {widthAmount}, height {heightAmount}. The parent sizing model is likely different from Figma.{contextIssue}'
+    ],
+    suggestion: [
+      'Check parent dimensions, flex or grid sizing, and surrounding padding or spacing constraints.{contextSuggestion}',
+      'Review the parent container width and height behavior, along with any flex, grid, or spacing rules around this element.{contextSuggestion}',
+      'Inspect the container constraints first: parent size, layout rules, and nearby spacing are the most likely causes.{contextSuggestion}'
+    ]
+  },
+  'width:positive': {
+    issue: [
+      'Element is {direction} than expected by {amount}. Possible overflow, stretched flex behavior, or an incorrect container width constraint.{contextIssue}',
+      'Width is larger than Figma by {amount}. This often happens when the element is allowed to grow beyond the intended container width.{contextIssue}',
+      'Element appears {direction} than designed by {amount}. A missing width cap or expanding layout rule may be stretching it.{contextIssue}'
+    ],
+    suggestion: [
+      'Check parent container width, missing max-width, flex growth, or content overflow constraints.{contextSuggestion}',
+      'Review width constraints such as max-width, flex-grow, and any overflowing content pushing the element outward.{contextSuggestion}',
+      'Inspect the parent width model and confirm the element is not expanding because of flex, intrinsic content, or missing caps.{contextSuggestion}'
+    ]
+  },
+  'width:negative': {
+    issue: [
+      'Element is {direction} than expected by {amount}. It may be shrinking too much or inheriting a tighter width constraint than intended.{contextIssue}',
+      'Width is smaller than Figma by {amount}. The element may be compressed by parent constraints or shrink behavior.{contextIssue}',
+      'Element looks {direction} than designed by {amount}. A restrictive width rule or limited horizontal space may be squeezing it.{contextIssue}'
+    ],
+    suggestion: [
+      'Check flex-shrink, fixed width rules, parent width constraints, or missing horizontal space.{contextSuggestion}',
+      'Review shrink behavior, fixed widths, and parent sizing rules that could be compressing the element horizontally.{contextSuggestion}',
+      'Inspect whether the parent is limiting available width or whether this element is shrinking more than intended.{contextSuggestion}'
+    ]
+  },
+  'height:positive': {
+    issue: [
+      'Element is {direction} than expected by {amount}. Extra padding, text wrapping, line-height, or min-height may be increasing the final size.{contextIssue}',
+      'Height is larger than Figma by {amount}. Additional spacing or wrapped content may be making the element taller than expected.{contextIssue}',
+      'Element appears {direction} than designed by {amount}. Padding, line-height, or content expansion may be inflating its height.{contextIssue}'
+    ],
+    suggestion: [
+      'Check padding, line-height, text wrapping, and min-height or content expansion around this element.{contextSuggestion}',
+      'Review vertical padding, text wrapping, and any min-height rule that could be stretching the element downward.{contextSuggestion}',
+      'Inspect content flow and vertical spacing to confirm the element is not growing because of wrapping or extra padding.{contextSuggestion}'
+    ]
+  },
+  'height:negative': {
+    issue: [
+      'Element is {direction} than expected by {amount}. Content may be clipped or the container may be collapsing below the intended height.{contextIssue}',
+      'Height is smaller than Figma by {amount}. Missing padding, clipped content, or a collapsed container could be reducing its size.{contextIssue}',
+      'Element looks {direction} than designed by {amount}. The final height may be reduced by clipping, tight spacing, or missing vertical room.{contextIssue}'
+    ],
+    suggestion: [
+      'Check padding, min-height, line-height, and any overflow or clipping rules affecting this element.{contextSuggestion}',
+      'Review vertical spacing, min-height, and overflow behavior to see whether the element is being compressed.{contextSuggestion}',
+      'Inspect padding and content height rules to confirm the container is not collapsing or clipping its contents.{contextSuggestion}'
+    ]
+  }
+}
+
+const GEOMETRY_CONTEXT_RULES = [
+  {
+    key: 'isFlexContainer',
+    issue: () => ' Parent uses flex layout, so flex sizing may be influencing the final box.',
+    suggestion: ({ primaryMetric, primaryDelta }) =>
+      primaryMetric === 'width'
+        ? ` Check flex-${primaryDelta > 0 ? 'grow' : 'shrink'} and flex-basis on this item and its siblings.`
+        : ' Check cross-axis sizing, align-items, and flex-basis in the parent flex container.'
+  },
+  {
+    key: 'isGridContainer',
+    issue: () => ' Parent uses grid layout, so track sizing may be affecting the final dimensions.',
+    suggestion: () =>
+      ' Review grid-template tracks, auto sizing, and item alignment in the parent grid.'
+  },
+  {
+    key: 'hasOverflowHidden',
+    issue: ({ primaryDelta }) =>
+      primaryDelta < 0 ? ' Overflow is clipped here, which can hide content and make the box read smaller.' : '',
+    suggestion: () =>
+      ' Inspect overflow, clipping, and whether content is being visually cut off.'
+  },
+  {
+    key: 'isTextElement',
+    issue: ({ primaryMetric }) =>
+      primaryMetric === 'height'
+        ? ' This appears to be text, so wrapping and line-height are strong suspects.'
+        : ' This appears to be text, so wrapping and intrinsic content width may be affecting the box.',
+    suggestion: ({ primaryMetric }) =>
+      primaryMetric === 'height'
+        ? ' Compare line-height, white-space, and wrapping behavior against the design.'
+        : ' Check white-space, wrapping, and whether text content is forcing a different width.'
+  },
+  {
+    key: 'hasPadding',
+    issue: () => ' Existing padding on the element may be contributing to the size difference.',
+    suggestion: () =>
+      ' Compare the applied padding values with Figma and confirm box-sizing is behaving as expected.'
+  },
+  {
+    key: 'isInlineElement',
+    issue: () => ' Inline layout can size the element from content flow instead of a fixed box.',
+    suggestion: () =>
+      ' Verify whether inline display is intentional or if a block or inline-block box is expected.'
+  }
+]
+
+let insightPickCounter = 0
+
+function pickRandom(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return ''
+
+  const index = insightPickCounter % arr.length
+  insightPickCounter += 1
+  return arr[index]
+}
+
+function fillTemplate(template, variables) {
+  return String(template).replace(/\{(\w+)\}/g, (_, key) =>
+    Object.prototype.hasOwnProperty.call(variables, key) ? variables[key] : ''
+  )
+}
+
+function getContextSignals(element) {
+  if (!(element instanceof Element)) {
+    return {
+      isFlexContainer: false,
+      isGridContainer: false,
+      hasOverflowHidden: false,
+      isTextElement: false,
+      hasPadding: false,
+      isInlineElement: false
+    }
+  }
+
+  const style = window.getComputedStyle(element)
+  const parentStyle = element.parentElement
+    ? window.getComputedStyle(element.parentElement)
+    : null
+  const tagName = element.tagName?.toLowerCase() || ''
+  const display = style.display || ''
+  const overflowValues = [
+    style.overflow,
+    style.overflowX,
+    style.overflowY,
+    parentStyle?.overflow,
+    parentStyle?.overflowX,
+    parentStyle?.overflowY
+  ]
+  const paddingValues = [
+    style.paddingTop,
+    style.paddingRight,
+    style.paddingBottom,
+    style.paddingLeft
+  ]
+  const textTags = new Set([
+    'span',
+    'p',
+    'label',
+    'a',
+    'strong',
+    'em',
+    'small',
+    'b',
+    'i',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6'
+  ])
+
+  return {
+    isFlexContainer: Boolean(parentStyle?.display?.includes('flex')),
+    isGridContainer: Boolean(parentStyle?.display?.includes('grid')),
+    hasOverflowHidden: overflowValues.some(value => value === 'hidden' || value === 'clip'),
+    isTextElement:
+      textTags.has(tagName) ||
+      (element.childElementCount === 0 && (element.textContent || '').trim().length > 0),
+    hasPadding: paddingValues.some(value => parseFloat(value) > 0),
+    isInlineElement:
+      display === 'inline' ||
+      display === 'inline-block' ||
+      display === 'inline-flex' ||
+      display === 'inline-grid'
+  }
+}
+
+function buildContextMessageFragments(signals, context) {
+  const issue = []
+  const suggestion = []
+
+  GEOMETRY_CONTEXT_RULES.forEach(rule => {
+    if (!signals?.[rule.key]) return
+
+    const issuePart = rule.issue?.(context) || ''
+    const suggestionPart = rule.suggestion?.(context) || ''
+
+    if (issuePart) issue.push(issuePart.trim())
+    if (suggestionPart) suggestion.push(suggestionPart.trim())
+  })
+
+  return {
+    issue: issue.length ? ` ${issue.join(' ')}` : '',
+    suggestion: suggestion.length ? ` ${suggestion.join(' ')}` : ''
+  }
+}
+
+function getMismatchDirection(metricKey, deltaValue) {
+  const largerText = metricKey === 'width' ? 'wider' : 'taller'
+  const smallerText = metricKey === 'width' ? 'narrower' : 'shorter'
+  return deltaValue > 0 ? largerText : smallerText
+}
+
+function buildGeometryInsight(result, element) {
+  if (result.status !== 'mismatch' || result.mappingStatus !== 'matched') {
+    return null
+  }
+
+  const activeMismatches = getActiveMetrics()
+    .filter(metric => result.comparisons?.[metric] === false)
+    .map(metric => ({
+      metric,
+      delta: getGeometryDelta(result.figma?.[metric], result.browser?.[metric])
+    }))
+    .filter(entry => typeof entry.delta === 'number')
+
+  if (!activeMismatches.length) return null
+
+  const widthEntry = activeMismatches.find(entry => entry.metric === 'width') || null
+  const heightEntry = activeMismatches.find(entry => entry.metric === 'height') || null
+  const primaryEntry = activeMismatches[0]
+  const signals = getContextSignals(element)
+  const scenarioKey =
+    activeMismatches.length === 2
+      ? 'combined'
+      : `${primaryEntry.metric}:${primaryEntry.delta > 0 ? 'positive' : 'negative'}`
+  const rule = GEOMETRY_INSIGHT_RULES[scenarioKey]
+
+  if (!rule) {
+    return {
+      issueTitle: 'Likely issue',
+      issueBody: 'Geometry differs from Figma and may be caused by layout constraints around this element.',
+      suggestionTitle: 'Suggestion',
+      suggestionBody: 'Inspect the parent container, sizing rules, and nearby spacing that influence this element.'
+    }
+  }
+
+  const contextFragments = buildContextMessageFragments(signals, {
+    primaryMetric: primaryEntry.metric,
+    primaryDelta: primaryEntry.delta,
+    activeMismatches
+  })
+  const variables = {
+    amount: formatPixelValue(primaryEntry.delta, { signed: true }),
+    direction: getMismatchDirection(primaryEntry.metric, primaryEntry.delta),
+    widthAmount: formatPixelValue(widthEntry?.delta, { signed: true }),
+    heightAmount: formatPixelValue(heightEntry?.delta, { signed: true }),
+    contextIssue: contextFragments.issue,
+    contextSuggestion: contextFragments.suggestion
+  }
+
+  return {
+    issueTitle: 'Likely issue',
+    issueBody: fillTemplate(pickRandom(rule.issue), variables),
+    suggestionTitle: 'Suggestion',
+    suggestionBody: fillTemplate(pickRandom(rule.suggestion), variables)
+  }
+}
+
+function createMetricRow(
+  label,
+  figmaValue,
+  browserValue,
+  isActive,
+  comparisonValue,
+  mappingStatus,
+  deltaValue
+) {
   const row = document.createElement('div')
   row.style.display = 'grid'
   row.style.gridTemplateColumns = '56px 1fr 1fr 76px'
@@ -288,11 +620,11 @@ function createMetricRow(label, figmaValue, browserValue, isActive, comparisonVa
   name.style.opacity = '0.7'
 
   const figma = document.createElement('div')
-  figma.textContent = typeof figmaValue === 'number' ? `${figmaValue}px` : '--'
+  figma.textContent = formatPixelValue(figmaValue)
   figma.style.color = '#fde68a'
 
   const browser = document.createElement('div')
-  browser.textContent = typeof browserValue === 'number' ? `${browserValue}px` : '--'
+  browser.textContent = formatPixelValue(browserValue)
   browser.style.color = '#bfdbfe'
 
   const status = document.createElement('div')
@@ -303,7 +635,11 @@ function createMetricRow(label, figmaValue, browserValue, isActive, comparisonVa
     status.textContent = 'Off'
     status.style.color = 'rgba(255,255,255,0.45)'
   } else {
-    status.textContent = comparisonValue ? 'Match' : 'Diff'
+    status.textContent = comparisonValue
+      ? 'Match'
+      : typeof deltaValue === 'number'
+        ? formatPixelValue(deltaValue, { signed: true })
+        : 'Diff'
     status.style.color = comparisonValue ? '#86efac' : '#fca5a5'
   }
   status.style.textAlign = 'right'
@@ -454,6 +790,9 @@ function buildValidationEntries(validation) {
 
 function createResultCard(entry) {
   const { result, depth, label, match } = entry
+  const widthDelta = getGeometryDelta(result.figma.width, result.browser.width)
+  const heightDelta = getGeometryDelta(result.figma.height, result.browser.height)
+  const geometryInsight = buildGeometryInsight(result, match?.element)
   const statusColor =
     result.status === 'match'
       ? 'rgba(34, 197, 94, 0.35)'
@@ -551,7 +890,7 @@ function createResultCard(entry) {
   metricsHeader.style.opacity = '0.65'
   metricsHeader.style.paddingBottom = '2px'
 
-  ;['Metric', 'Figma', 'Browser', ''].forEach(text => {
+  ;['Metric', 'Figma', 'Browser', 'Diff'].forEach(text => {
     const col = document.createElement('div')
     col.textContent = text
     metricsHeader.appendChild(col)
@@ -576,7 +915,8 @@ function createResultCard(entry) {
       result.browser.width,
       comparisonSettings.width,
       result.comparisons?.width,
-      result.mappingStatus
+      result.mappingStatus,
+      widthDelta
     )
   )
   card.appendChild(
@@ -586,9 +926,27 @@ function createResultCard(entry) {
       result.browser.height,
       comparisonSettings.height,
       result.comparisons?.height,
-      result.mappingStatus
+      result.mappingStatus,
+      heightDelta
     )
   )
+
+  if (geometryInsight) {
+    card.appendChild(
+      createInsightSection(
+        geometryInsight.issueTitle,
+        geometryInsight.issueBody,
+        '#fca5a5'
+      )
+    )
+    card.appendChild(
+      createInsightSection(
+        geometryInsight.suggestionTitle,
+        geometryInsight.suggestionBody,
+        '#93c5fd'
+      )
+    )
+  }
 
   if (result.status !== 'match') {
     card.appendChild(createStyleDetails(result))
