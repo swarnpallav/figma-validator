@@ -1,117 +1,160 @@
-# Figma Validator
+# 🚀 Figma Validator
 
-A developer tool to validate implemented UI against Figma designs in real time.
+Validate implemented UI against Figma designs in real time — and understand exactly where and why it differs.
 
-Figma Validator consists of:
+Figma Validator is a developer tool that connects your Figma design with a live webpage to detect layout inconsistencies instantly.
 
-- A Figma Plugin to capture geometry from selected Figma nodes
-- A Chrome Extension to compare that geometry with live webpage elements
+---
 
-It helps reduce manual inspection time and surfaces subtle implementation drift that is hard to catch visually.
+## ⚠️ Requirements
+
+Figma Validator consists of **two parts that work together**:
+
+- 🧩 Figma Plugin — captures geometry from selected Figma nodes  
+- 🌐 Chrome Extension — compares that geometry with live webpage elements  
+
+👉 Both are required for validation.
 
 ---
 
 ## 🚀 Live
 
-- 🧩 Figma Plugin: Approved & Published
+- 🧩 Figma Plugin: Approved & Published  
 - 🌐 Chrome Extension: Published (Unlisted)
 
-Chrome Extension Link:
-https://chromewebstore.google.com/detail/figma-validator/abckkojoejplbhaodfpebcaofokmmpjh?authuser=0&hl=en
+Chrome Extension:  
+https://chromewebstore.google.com/detail/figma-validator/abckkojoejplbhaodfpebcaofokmmpjh?authuser=0&hl=en  
 
-Figma Plugin Link:
-https://www.figma.com/community/plugin/1604167807144854725
-
----
-
-## 🚀 How it works
-
-1. Select an element in Figma using the plugin
-2. Open your website
-3. Press Shift + Click on any element
-4. Instantly see a comparison panel showing:
-
-- Layout geometry validation for the selected container and its visible descendants
-- Width/height differences with configurable comparison filters
-- Explicit `match`, `mismatch`, and `unmatched` mapping states
+Figma Plugin:  
+https://www.figma.com/community/plugin/1604167807144854725  
 
 ---
 
-## 🧠 Mapping Logic
+## ⚡ Quick Start
 
-The current implementation is geometry-first and container-first.
+1. Open your design in Figma  
+2. Run the Figma Validator plugin  
+3. Select any element (frame/text/layer)  
+4. Open your website  
+5. Press **Shift + Click** on the corresponding element  
 
-1. The Figma plugin exports a recursive snapshot of the selected node using `absoluteBoundingBox`.
-2. The Chrome extension reads visible DOM rectangles using `getBoundingClientRect()`.
-3. For each Figma node, the validator projects its bounds into the browser container coordinate space.
-4. DOM candidates are filtered before scoring.
-   - Candidates must be visually plausible, not just the “least bad” option.
-   - Inner SVG nodes are ignored so icons are validated at the wrapper level.
-5. Only eligible DOM candidates are scored.
-   - If no candidate is close enough, the node is marked `unmatched`.
-   - This is intentional: the tool prefers precision over forced mappings.
-6. Once a DOM node is used for a Figma node, it is removed from the unmatched pool for sibling matching.
-
-This means the validator is optimized for minor design drift, not for reconstructing the entire DOM tree from Figma.
-
----
-
-## 🔍 Match States
-
-- `match`: The node mapped successfully and the selected dimensions are within tolerance.
-- `mismatch`: The node mapped successfully, but one or more selected dimensions differ beyond tolerance.
-- `unmatched`: No DOM candidate passed the mapping eligibility gate, so the validator intentionally avoids forcing a bad mapping.
-
-`unmatched` is usually better than a misleading mismatch, because this tool is meant to identify subtle implementation errors, not invent correspondences for structurally different nodes.
+👉 Instantly see validation results
 
 ---
 
 ## ✨ Features
 
-- Recursive geometry snapshot extraction from Figma
-- Eligibility-gated DOM mapping for minor-diff validation
-- Visual mismatch highlighting and numbered markers
-- Side-panel hierarchy with per-node comparison details
-- Works on any website
-- Local-only processing (no data collection)
+### 📏 Geometry-based validation
+- Width & height comparison using real rendered dimensions  
+- Detect subtle layout drift not visible to the eye  
+
+### 🔍 Smart DOM mapping
+- Matches Figma nodes to **eligible DOM elements only**  
+- Avoids incorrect mappings (precision-first approach)  
+
+### 🎯 Clear validation states
+- `match` → correct implementation  
+- `mismatch` → measurable difference  
+- `unmatched` → no reliable DOM mapping found  
+
+### 🧩 Recursive validation
+- Validates container and visible descendants  
+- Preserves hierarchy for better debugging  
+
+### 📊 Visual debugging panel
+- Side panel with per-node comparison  
+- Highlighted overlays with numbered markers  
+- Expandable details for deeper inspection  
+
+### 🔒 Privacy-first
+- No data collection  
+- No tracking  
+- No external API calls  
+- Fully local execution  
 
 ---
 
-## 🧰 Tech Stack
+## 🧠 How it works
 
-- Chrome Extension (Manifest V3)
-- Figma Plugin API
-- JavaScript
-- DOM APIs
-- chrome.storage
-- window.postMessage bridge
+Figma Validator uses a **geometry-first, precision-focused approach**:
 
+1. The Figma plugin exports a recursive snapshot using `absoluteBoundingBox`  
+2. The extension reads DOM geometry via `getBoundingClientRect()`  
+3. Figma nodes are projected into browser coordinate space  
+4. DOM candidates are filtered based on visual plausibility  
+5. Only eligible candidates are scored (no forced matches)  
+6. Used DOM nodes are removed to prevent duplicate mapping  
+
+👉 The system is optimized for **detecting implementation drift**, not reconstructing DOM structure.
+
+---
+
+## 🔍 Match States Explained
+
+- **match**  
+  Node mapped successfully and dimensions are within tolerance  
+
+- **mismatch**  
+  Node mapped successfully but dimensions differ  
+
+- **unmatched**  
+  No DOM element passed the eligibility check  
+
+👉 `unmatched` is intentional — it avoids misleading comparisons.
 
 ---
 
 ## 🎯 Problem it solves
 
-Frontend developers often miss tiny width, height, spacing, or wrapper-level regressions that “look fine” at a glance.
+Frontend developers often miss:
+
+- small spacing issues  
+- incorrect container sizes  
+- layout drift that “looks fine”  
 
 Figma Validator helps by:
 
-- mapping visible Figma nodes to plausible DOM equivalents
-- comparing geometry instead of relying on CSS implementation details
-- highlighting only meaningful differences that are likely to reflect implementation drift
+- comparing **actual rendered geometry**  
+- avoiding unreliable CSS-based assumptions  
+- highlighting only meaningful inconsistencies  
 
 ---
 
-## 🔒 Privacy
+## 🧰 Tech Stack
 
-- No data collection
-- No tracking
-- No external API calls
-- All processing happens locally
+- Chrome Extension (Manifest V3)  
+- Figma Plugin API  
+- JavaScript  
+- DOM APIs  
+- chrome.storage  
+- window.postMessage bridge  
 
 ---
 
-## Versions
+## 📦 Versions
 
-- v1.0.0 – Initial release
+- **v1.0.0** — Initial release  
+- **v1.1.0** — Geometry-based validation  
 
-More features coming soon.
+👉 More advanced validation and insights coming soon.
+
+---
+
+## 🛣️ Roadmap
+
+- [ ] Hybrid validation (geometry + CSS insights)  
+- [ ] Likely issue detection  
+- [ ] Actionable suggestions  
+- [ ] Context-aware debugging (flex, overflow, etc.)  
+
+---
+
+## 🤝 Contributing
+
+Feel free to open issues or suggest improvements.
+
+---
+
+## 📄 License
+
+MIT
