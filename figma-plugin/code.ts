@@ -1,104 +1,115 @@
-// This plugin will open a tab that indicates that it will monitor the current
-// selection on the page. It cannot change the document itself.
+interface IBoundingBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
-interface IStyleSnapshot {
-  spacing?: {
-    marginTop?: number | null
-    marginRight?: number | null
-    marginBottom?: number | null
-    marginLeft?: number | null
-    paddingTop: number | null
-    paddingRight?: number | null
-    paddingBottom?: number | null
-    paddingLeft?: number | null
+interface ILayoutSnapshotNode {
+  nodeId: string
+  nodeName: string
+  nodeType: SceneNode['type']
+  bounds: IBoundingBox
+  visible: boolean
+  children: ILayoutSnapshotNode[]
+}
+
+interface ILayoutSnapshotStats {
+  totalNodes: number
+  maxDepth: number
+}
+
+function getNodeBounds(node: SceneNode): IBoundingBox | null {
+  if (!('absoluteBoundingBox' in node) || !node.absoluteBoundingBox) {
+    return null
   }
-  typography?: {
-    fontSize?: number | null
-    fontWeight?: number | null
-    lineHeight?: number | null
-  }
-  colors?: {
-    text?: { r: number; g: number; b: number } | null
-    background?: { r: number; g: number; b: number } | null
-  }
-  border?: {
-    radius?: number | null
+
+  const { x, y, width, height } = node.absoluteBoundingBox
+
+  return { x, y, width, height }
+}
+
+function isVisualNode(node: SceneNode): boolean {
+  if (!node.visible) return false
+  // Vector internals tend to collapse into a single DOM icon wrapper, so we
+  // validate icons at the wrapper level instead of trying to map each path.
+  if (node.type === 'VECTOR') return false
+
+  const bounds = getNodeBounds(node)
+  if (!bounds) return false
+
+  return bounds.width > 0 && bounds.height > 0
+}
+
+function toSnapshotNode(node: SceneNode): ILayoutSnapshotNode | null {
+  const bounds = getNodeBounds(node)
+  if (!bounds || !node.visible) return null
+
+  return {
+    nodeId: node.id,
+    nodeName: node.name,
+    nodeType: node.type,
+    bounds,
+    visible: node.visible,
+    children: []
   }
 }
 
-// This file holds the main code for plugins. Code in this file has access to
-// the *figma document* via the figma global object.
-// You can access browser APIs in the <script> tag inside "ui.html" which has a
-// full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
+function getVisibleChildren(node: SceneNode): SceneNode[] {
+  if (!('children' in node)) return []
 
-// This shows the HTML page in "ui.html".
+  return node.children.filter(child => isVisualNode(child))
+}
+
+function createLayoutSnapshot(node: SceneNode): ILayoutSnapshotNode | null {
+  const snapshot = toSnapshotNode(node)
+  if (!snapshot) return null
+
+  // The extension expects a recursive visible-node tree so it can validate a
+  // selected container and then walk the geometry top-down in the browser.
+  snapshot.children = getVisibleChildren(node)
+    .map(child => createLayoutSnapshot(child))
+    .filter((child): child is ILayoutSnapshotNode => child !== null)
+
+  return snapshot
+}
+
+function getSnapshotStats(
+  node: ILayoutSnapshotNode,
+  depth = 0
+): ILayoutSnapshotStats {
+  return node.children.reduce(
+    (stats, child) => {
+      const childStats = getSnapshotStats(child, depth + 1)
+
+      return {
+        totalNodes: stats.totalNodes + childStats.totalNodes,
+        maxDepth: Math.max(stats.maxDepth, childStats.maxDepth)
+      }
+    },
+    {
+      totalNodes: 1,
+      maxDepth: depth
+    }
+  )
+}
+
 figma.showUI(__html__)
 
-// This monitors the selection changes and posts the selection to the UI
-figma.on('selectionchange', () => {
-  figma.ui.postMessage(figma.currentPage.selection)
+function publishCurrentSelection(): void {
   const selection = figma.currentPage.selection
+  if (selection.length === 0) return
 
-  const styleSnapshot: IStyleSnapshot = {}
+  // The plugin always publishes the first selected node as the layout root.
+  const snapshot = createLayoutSnapshot(selection[0])
+  if (!snapshot) return
 
-  if (selection.length > 0) {
-    const node = selection[0]
-    const styleSnapshot: IStyleSnapshot = {}
+  figma.ui.postMessage({
+    type: 'snapshot',
+    data: snapshot
+  })
+}
 
-    // --- TYPOGRAPHY ---
-    if (node.type === 'TEXT') {
-      styleSnapshot.typography = {
-        fontSize: typeof node.fontSize === 'number' ? node.fontSize : null,
-        fontWeight:
-          typeof node.fontWeight === 'number' ? node.fontWeight : null,
-        lineHeight:
-          typeof node.lineHeight === 'object' && 'value' in node.lineHeight
-            ? node.lineHeight.value
-            : null
-      }
-    }
+figma.on('selectionchange', publishCurrentSelection)
 
-    // --- BORDER RADIUS ---
-    if ('cornerRadius' in node) {
-      styleSnapshot.border = {
-        radius: typeof node.cornerRadius === 'number' ? node.cornerRadius : null
-      }
-    }
-
-    // --- PADDING (ONLY FOR AUTO LAYOUT FRAMES) ---
-    if ('paddingTop' in node) {
-      styleSnapshot.spacing = {
-        paddingTop: node.paddingTop ?? null,
-        paddingRight: node.paddingRight ?? null,
-        paddingBottom: node.paddingBottom ?? null,
-        paddingLeft: node.paddingLeft ?? null
-      }
-    }
-
-    // --- COLORS ---
-    if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
-      const fill = node.fills[0]
-
-      if (fill.type === 'SOLID') {
-        const { r, g, b } = fill.color
-
-        styleSnapshot.colors = {
-          background: {
-            r: Math.round(r * 255),
-            g: Math.round(g * 255),
-            b: Math.round(b * 255)
-          }
-        }
-      }
-    }
-
-    figma.ui.postMessage({
-      type: 'snapshot',
-      data: styleSnapshot
-    })
-
-    console.log('Style snapshot:', styleSnapshot)
-  }
-})
-
-// figma.closePlugin()
+publishCurrentSelection()
