@@ -1,6 +1,255 @@
-<pre id="output">Select a container in Figma…</pre>
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 16px;
+    background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+    color: #e5e7eb;
+  }
+
+  .shell {
+    display: grid;
+    gap: 12px;
+  }
+
+  .card {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.72);
+    box-shadow: 0 16px 40px rgba(2, 6, 23, 0.35);
+    padding: 14px;
+  }
+
+  .hero {
+    display: grid;
+    gap: 10px;
+  }
+
+  .eyebrow {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #93c5fd;
+  }
+
+  .title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+
+  .subtitle {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #cbd5e1;
+  }
+
+  .selection {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(30, 41, 59, 0.68);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+  }
+
+  .selection-label {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .selection-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f8fafc;
+    word-break: break-word;
+  }
+
+  .selection-meta {
+    font-size: 12px;
+    color: #cbd5e1;
+  }
+
+  .field {
+    display: grid;
+    gap: 6px;
+  }
+
+  .field-label {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .field-input {
+    width: 100%;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    padding: 11px 12px;
+    background: rgba(15, 23, 42, 0.82);
+    color: #f8fafc;
+    font-size: 12px;
+    outline: none;
+  }
+
+  .field-input:focus {
+    border-color: rgba(251, 113, 133, 0.75);
+    box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.15);
+  }
+
+  .field-help {
+    font-size: 12px;
+    color: #cbd5e1;
+  }
+
+  .cta {
+    appearance: none;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f97316 0%, #fb7185 100%);
+    color: #fff;
+    cursor: pointer;
+    transition: transform 120ms ease, opacity 120ms ease;
+  }
+
+  .cta:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .cta:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .status {
+    min-height: 18px;
+    font-size: 12px;
+    color: #86efac;
+  }
+
+  details {
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    overflow: hidden;
+  }
+
+  summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #cbd5e1;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  pre {
+    margin: 0;
+    padding: 0 14px 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    color: #cbd5e1;
+  }
+</style>
+
+<div class="shell">
+  <section class="card hero">
+    <p class="eyebrow">Figma Validator</p>
+    <h1 class="title">Copy an implementation-ready prompt</h1>
+    <p class="subtitle">
+      Use this instead of Figma’s generic MCP CTA. It includes the current selection link and validator-friendly implementation guidance.
+    </p>
+
+    <div class="selection">
+      <div class="selection-label">Current selection</div>
+      <div id="selection-name" class="selection-name">Select a container in Figma…</div>
+      <div id="selection-meta" class="selection-meta">Waiting for a valid root selection.</div>
+    </div>
+
+    <label class="field">
+      <span class="field-label">Figma design link</span>
+      <input
+        id="design-url"
+        class="field-input"
+        type="url"
+        placeholder="Paste the Figma design URL for this file"
+      />
+      <span id="design-url-help" class="field-help">
+        Paste the design URL first. Then the prompt will include the current selection link.
+      </span>
+    </label>
+
+    <button id="copy-prompt" class="cta" disabled>Copy Implementation Prompt</button>
+    <div id="copy-status" class="status"></div>
+  </section>
+
+  <details class="card">
+    <summary>Technical snapshot</summary>
+    <pre id="output">Select a container in Figma…</pre>
+  </details>
+</div>
 
 <script>
+  const copyButton = document.getElementById('copy-prompt')
+  const copyStatus = document.getElementById('copy-status')
+  const selectionName = document.getElementById('selection-name')
+  const selectionMeta = document.getElementById('selection-meta')
+  const designUrlInput = document.getElementById('design-url')
+  const designUrlHelp = document.getElementById('design-url-help')
+  const output = document.getElementById('output')
+
+  let latestPayload = null
+  let resetStatusTimer = null
+
+  function getStoredDesignUrl() {
+    try {
+      return window.localStorage.getItem('figma-validator-design-url') || ''
+    } catch (error) {
+      return ''
+    }
+  }
+
+  function setStoredDesignUrl(value) {
+    try {
+      if (!value) {
+        window.localStorage.removeItem('figma-validator-design-url')
+        return
+      }
+
+      window.localStorage.setItem('figma-validator-design-url', value)
+    } catch (error) {
+      // Ignore storage errors in plugin runtimes where localStorage is unavailable.
+    }
+  }
+
+  const storedDesignUrl = getStoredDesignUrl()
+
+  if (storedDesignUrl) {
+    designUrlInput.value = storedDesignUrl
+  }
+
   function getSnapshotStats(node, depth = 0) {
     return (node.children || []).reduce(
       (stats, child) => {
@@ -22,28 +271,270 @@
     return JSON.parse(JSON.stringify(data))
   }
 
-  window.onmessage = event => {
+  function bytesToDataUrl(bytes) {
+    if (!Array.isArray(bytes) || bytes.length === 0) {
+      return Promise.resolve(null)
+    }
+
+    return new Promise(resolve => {
+      const reader = new FileReader()
+      reader.onloadend = () =>
+        resolve(typeof reader.result === 'string' ? reader.result : null)
+      reader.readAsDataURL(
+        new Blob([new Uint8Array(bytes)], {
+          type: 'image/png'
+        })
+      )
+    })
+  }
+
+  function setStatus(message, color = '#86efac') {
+    if (resetStatusTimer) {
+      clearTimeout(resetStatusTimer)
+      resetStatusTimer = null
+    }
+
+    copyStatus.textContent = message
+    copyStatus.style.color = color
+  }
+
+  function sanitizeNodeId(nodeId) {
+    return encodeURIComponent(String(nodeId || '').replace(/:/g, '-'))
+  }
+
+  function getValidatedDesignUrl(rawValue) {
+    const value = String(rawValue || '').trim()
+    if (!value) return null
+
+    try {
+      const url = new URL(value)
+      if (!/^https?:$/.test(url.protocol)) return null
+      if (!/figma\.com$/i.test(url.hostname)) return null
+      if (!/\/(design|file)\//.test(url.pathname)) return null
+      return url
+    } catch (error) {
+      return null
+    }
+  }
+
+  function buildSelectionUrl(designUrl, nodeId) {
+    const validUrl = getValidatedDesignUrl(designUrl)
+    if (!validUrl || !nodeId) return null
+
+    validUrl.searchParams.set('node-id', sanitizeNodeId(nodeId))
+    return validUrl.toString()
+  }
+
+  function truncateTreeText(value, maxLen) {
+    const s = String(value || '')
+    if (s.length <= maxLen) return s
+    return `${s.slice(0, maxLen - 1)}…`
+  }
+
+  function quoteNodeName(name) {
+    const t = String(name || '').trim()
+    if (!t) return '"(unnamed)"'
+    return `"${t.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  }
+
+  function formatStylesBracket(styles, nodeType) {
+    if (!styles) return ''
+    const parts = []
+    const lo = styles.layout
+    if (lo) {
+      if (lo.layoutMode === 'HORIZONTAL') parts.push('horizontal')
+      else if (lo.layoutMode === 'VERTICAL') parts.push('vertical')
+      else if (lo.layoutMode === 'GRID') parts.push('grid')
+      if (typeof lo.itemSpacing === 'number') parts.push(`gap:${lo.itemSpacing}`)
+    }
+    const sp = styles.spacing
+    if (
+      sp &&
+      [sp.paddingTop, sp.paddingRight, sp.paddingBottom, sp.paddingLeft].some(v => v != null)
+    ) {
+      parts.push(
+        `pad:${[sp.paddingTop, sp.paddingRight, sp.paddingBottom, sp.paddingLeft]
+          .map(v => (v == null ? '?' : v))
+          .join(' ')}`
+      )
+    }
+    if (nodeType === 'TEXT' && styles.typography && styles.typography.fontFamily) {
+      parts.push(`font:${styles.typography.fontFamily}`)
+    }
+    return parts.length ? ` [${parts.join(', ')}]` : ''
+  }
+
+  function buildCompactTree(node, depth = 0) {
+    if (!node) return ''
+    const children = Array.isArray(node.children) ? node.children : []
+    const nameEmpty = !String(node.nodeName || '').trim()
+    if (nameEmpty && children.length === 0) return ''
+
+    const indent = '  '.repeat(depth)
+    const type = node.nodeType || 'NODE'
+    const bracket = formatStylesBracket(node.styles, type)
+    let line
+    if (type === 'TEXT') {
+      const text = truncateTreeText(node.textContent, 60)
+      line = `${indent}${type} ${quoteNodeName(node.nodeName)}${bracket} → ${JSON.stringify(text)}`
+    } else {
+      line = `${indent}${type} ${quoteNodeName(node.nodeName)}${bracket}`
+    }
+
+    const childLines = children
+      .map(ch => buildCompactTree(ch, depth + 1))
+      .filter(Boolean)
+    return childLines.length ? `${line}\n${childLines.join('\n')}` : line
+  }
+
+  function buildImplementationPrompt(payload, designUrl) {
+    if (!payload?.implementationPrompt) return null
+
+    const selectionUrl = buildSelectionUrl(designUrl, payload.nodeId)
+    const basePrompt = String(payload.implementationPrompt)
+      .replace(/\n\nFigma selection: .+$/s, '')
+      .trim()
+
+    if (!selectionUrl) return null
+
+    const tree = buildCompactTree(payload)
+    return `${basePrompt}\n\nFigma selection: ${selectionUrl}\n\nFigma tree (visible nodes):\n\n${tree}`
+  }
+
+  function refreshPromptReadiness() {
+    const validDesignUrl = getValidatedDesignUrl(designUrlInput.value)
+    const prompt = buildImplementationPrompt(latestPayload, designUrlInput.value)
+
+    if (validDesignUrl) {
+      setStoredDesignUrl(validDesignUrl.toString())
+      designUrlHelp.textContent = latestPayload?.nodeId
+        ? 'Prompt ready. The copied prompt will include the current selection link.'
+        : 'URL saved. Select a Figma root to enable the prompt.'
+    } else {
+      if (designUrlInput.value.trim()) {
+        designUrlHelp.textContent = 'Enter a valid Figma design URL.'
+      } else {
+        designUrlHelp.textContent =
+          'Paste the design URL first. Then the prompt will include the current selection link.'
+      }
+    }
+
+    const isReady = Boolean(prompt)
+    copyButton.disabled = !isReady
+    copyButton.textContent = isReady
+      ? 'Copy Implementation Prompt'
+      : latestPayload?.nodeId
+        ? 'Copy Implementation Prompt'
+        : 'Select a Figma root first'
+    selectionMeta.textContent = isReady
+      ? 'Prompt ready with the current selection link.'
+      : latestPayload?.nodeId
+        ? 'Paste a valid Figma design URL to enable the prompt.'
+        : 'Waiting for a valid root selection.'
+
+    return prompt
+  }
+
+  async function copyTextToClipboard(text) {
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === 'function'
+    ) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    textarea.style.pointerEvents = 'none'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+
+    const success = document.execCommand('copy')
+    textarea.remove()
+
+    if (!success) {
+      throw new Error('Copy command failed')
+    }
+  }
+
+  async function copyImplementationPrompt() {
+    const prompt = refreshPromptReadiness()
+    if (!prompt) return
+
+    try {
+      await copyTextToClipboard(prompt)
+      setStatus('Implementation prompt copied.')
+      resetStatusTimer = setTimeout(() => setStatus(''), 2200)
+    } catch (error) {
+      setStatus('Copy failed. Try again.', '#fca5a5')
+    }
+  }
+
+  copyButton.addEventListener('click', copyImplementationPrompt)
+  designUrlInput.addEventListener('input', () => {
+    refreshPromptReadiness()
+    setStatus('')
+  })
+
+  refreshPromptReadiness()
+
+  window.onmessage = async event => {
     const msg = event.data.pluginMessage
 
     if (msg.type === 'snapshot') {
       const data = toPlainSnapshot(msg.data)
       const stats = getSnapshotStats(data)
+      const referenceImage = await bytesToDataUrl(data.referenceBytes)
+      const payload = {
+        ...data,
+        referenceImage,
+        referenceScale: data.referenceScale || null,
+        referenceBounds: data.referenceBounds || null
+      }
+
+      delete payload.referenceBytes
+      latestPayload = payload
+
+      console.log('LOG_', JSON.stringify(payload))
       window.top.postMessage(
         {
           source: 'figma-validator',
           type: 'FIGMA_LAYOUT_SNAPSHOT',
-          payload: data
+          payload
         },
         '*'
       )
 
-      // show JSON in panel
-      document.getElementById('output').textContent = [
-        `Root: ${data.nodeName} (${data.nodeId})`,
+      selectionName.textContent = payload.nodeName || 'Selected root'
+      refreshPromptReadiness()
+      setStatus('')
+
+      const selectionUrl = buildSelectionUrl(designUrlInput.value, payload.nodeId)
+      output.textContent = [
+        `Root: ${payload.nodeName} (${payload.nodeId})`,
         `Total nodes: ${stats.totalNodes}`,
         `Max depth: ${stats.maxDepth}`,
+        `Reference image: ${referenceImage ? 'ready' : 'unavailable'}`,
+        `Selection link: ${selectionUrl || 'unavailable'}`,
         '',
-        JSON.stringify(data, null, 2)
+        JSON.stringify(
+          {
+            ...payload,
+            referenceImage: referenceImage ? '[data-url]' : null,
+            selectionUrl: selectionUrl || null,
+            implementationPrompt: buildImplementationPrompt(payload, designUrlInput.value)
+              ? '[ready]'
+              : '[missing design URL]'
+          },
+          null,
+          2
+        )
       ].join('\n')
     }
   }
