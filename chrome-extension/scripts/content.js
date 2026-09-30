@@ -1761,9 +1761,13 @@ function createMetricRow(
   return row
 }
 
-function formatStyleValue(value) {
+const UNITLESS_STYLE_PROPERTIES = new Set(['opacity', 'fontWeight'])
+
+function formatStyleValue(value, propertyKey = '') {
   if (value == null) return '--'
-  if (typeof value === 'number') return `${value}px`
+  if (typeof value === 'number') {
+    return UNITLESS_STYLE_PROPERTIES.has(propertyKey) ? String(value) : `${value}px`
+  }
   if (typeof value === 'object' && 'r' in value) {
     return `rgb(${value.r}, ${value.g}, ${value.b})`
   }
@@ -1819,6 +1823,14 @@ function createStyleDetails(result) {
     body.appendChild(note)
   }
 
+  if (result.inheritedTextStyleFrom) {
+    const note = document.createElement('div')
+    note.textContent = `Typography taken from text layer "${result.inheritedTextStyleFrom.nodeName}".`
+    note.style.fontSize = '11px'
+    note.style.opacity = '0.75'
+    body.appendChild(note)
+  }
+
   const source =
     result.mappingStatus === 'matched' ? result.styleComparison : { figma: result.figmaStyles }
   const groups = source?.figma || {}
@@ -1862,7 +1874,7 @@ function createStyleDetails(result) {
       row.appendChild(property)
 
       const figma = document.createElement('div')
-      figma.textContent = formatStyleValue(figmaValue)
+      figma.textContent = formatStyleValue(figmaValue, propertyKey)
       figma.style.color = '#fde68a'
       figma.style.minWidth = '0'
       row.appendChild(figma)
@@ -1872,14 +1884,15 @@ function createStyleDetails(result) {
         const diff = source.diffs?.[groupKey]?.[propertyKey]
 
         const browser = document.createElement('div')
-        browser.textContent = formatStyleValue(browserValue)
+        browser.textContent = formatStyleValue(browserValue, propertyKey)
         browser.style.color = '#bfdbfe'
         browser.style.minWidth = '0'
         browser.style.wordBreak = 'break-word'
         row.appendChild(browser)
 
+        const equivalent = source.equivalents?.[groupKey]?.[propertyKey]
         const status = document.createElement('div')
-        status.textContent = diff ? 'Diff' : 'Match'
+        status.textContent = diff ? 'Diff' : equivalent ? `Match (${equivalent})` : 'Match'
         status.style.color = diff ? '#fca5a5' : '#86efac'
         status.style.textAlign = 'right'
         row.appendChild(status)
@@ -2257,8 +2270,12 @@ function getFixPropertyLabel(property) {
   if (property === 'border-top-right-radius') return 'top-right radius'
   if (property === 'border-bottom-right-radius') return 'bottom-right radius'
   if (property === 'border-bottom-left-radius') return 'bottom-left radius'
-  if (property === 'stroke-width') return 'stroke width'
-  if (property === 'stroke-color') return 'stroke color'
+  if (property === 'border-width') return 'border width'
+  if (property === 'border-top-width') return 'top border width'
+  if (property === 'border-right-width') return 'right border width'
+  if (property === 'border-bottom-width') return 'bottom border width'
+  if (property === 'border-left-width') return 'left border width'
+  if (property === 'border-color') return 'border color'
   if (property === 'text-color') return 'text color'
   if (property === 'background-color') return 'background color'
   if (property === 'opacity') return 'opacity'
@@ -2526,7 +2543,7 @@ function buildQaInterpretation(entries) {
     }
 
     if (kind === 'stroke') {
-      return 'Check the stroke width on this element and match the Figma border treatment.'
+      return 'Check the border width on this element and match the Figma stroke (border) treatment.'
     }
 
     if (kind === 'color') {
@@ -2802,7 +2819,7 @@ function buildQaInterpretation(entries) {
         }
       },
       border: {
-        strokeColor: { cssProperty: 'stroke-color', label: 'color', allowVisualQa: false }
+        strokeColor: { cssProperty: 'border-color', label: 'color', allowVisualQa: false }
       }
     }
 
@@ -2885,7 +2902,19 @@ function buildQaInterpretation(entries) {
           kind: 'shape',
           allowVisualQa: false
         },
-        strokeWidth: { cssProperty: 'stroke-width', kind: 'stroke', allowVisualQa: false },
+        strokeWidth: { cssProperty: 'border-width', kind: 'stroke', allowVisualQa: false },
+        strokeTopWidth: { cssProperty: 'border-top-width', kind: 'stroke', allowVisualQa: false },
+        strokeRightWidth: {
+          cssProperty: 'border-right-width',
+          kind: 'stroke',
+          allowVisualQa: false
+        },
+        strokeBottomWidth: {
+          cssProperty: 'border-bottom-width',
+          kind: 'stroke',
+          allowVisualQa: false
+        },
+        strokeLeftWidth: { cssProperty: 'border-left-width', kind: 'stroke', allowVisualQa: false },
         strokeColor: null
       },
       compositing: {
@@ -3470,13 +3499,21 @@ function buildQaInterpretation(entries) {
       ].forEach(([groupKey, propertyKey]) => {
         createColorIssue(entry, parentEntry, groupKey, propertyKey)
       })
+      // Report a single radius / stroke width when both sides are uniform;
+      // otherwise fall back to per-corner / per-side issues so one mismatch
+      // is not reported up to five times.
+      const hasUniformBorderMetric = propertyKey =>
+        entry.result.styleComparison?.figma?.border?.[propertyKey] != null &&
+        entry.result.styleComparison?.browser?.border?.[propertyKey] != null
+      const cornerKeys = ['topLeftRadius', 'topRightRadius', 'bottomRightRadius', 'bottomLeftRadius']
+      const strokeSideKeys = ['strokeTopWidth', 'strokeRightWidth', 'strokeBottomWidth', 'strokeLeftWidth']
       ;[
-        ['border', 'radius'],
-        ['border', 'topLeftRadius'],
-        ['border', 'topRightRadius'],
-        ['border', 'bottomRightRadius'],
-        ['border', 'bottomLeftRadius'],
-        ['border', 'strokeWidth'],
+        ...(hasUniformBorderMetric('radius')
+          ? [['border', 'radius']]
+          : cornerKeys.map(key => ['border', key])),
+        ...(hasUniformBorderMetric('strokeWidth')
+          ? [['border', 'strokeWidth']]
+          : strokeSideKeys.map(key => ['border', key])),
         ['compositing', 'opacity'],
         ['compositing', 'blendMode'],
         ['effects', 'shadow']
@@ -4652,7 +4689,7 @@ function getEnhancedDevBadgeConfig(issue) {
 
   if (issue.kind === 'stroke') {
     return {
-      label: 'STROKE ISSUE',
+      label: 'BORDER ISSUE',
       color: '#7c3aed'
     }
   }
@@ -4684,7 +4721,7 @@ function getIssueKindLabel(kind) {
   if (kind === 'typography') return 'Typography'
   if (kind === 'color') return 'Color'
   if (kind === 'shape') return 'Shape'
-  if (kind === 'stroke') return 'Stroke'
+  if (kind === 'stroke') return 'Border'
   if (kind === 'style') return 'Style'
   if (kind === 'alignment') return 'Alignment'
   if (kind === 'spacing') return 'Spacing'
@@ -4719,7 +4756,7 @@ function getIssueKindDescription(kind) {
   }
 
   if (kind === 'stroke') {
-    return 'Stroke compares border width and border style against the Figma stroke treatment.'
+    return 'Border compares CSS border width against the Figma stroke weight.'
   }
 
   if (kind === 'style') {
@@ -5555,7 +5592,7 @@ function createQaIssueCard(issue) {
       : issue.kind === 'shape'
         ? 'Shape issue'
         : issue.kind === 'stroke'
-          ? 'Stroke issue'
+          ? 'Border issue'
       : issue.kind === 'visual_style' || issue.kind === 'typography' || issue.kind === 'style'
       ? 'Style issue'
       : issue.kind === 'size'
