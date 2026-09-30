@@ -47,6 +47,10 @@ interface IBorderStyles {
   bottomRightRadius: number | null
   bottomLeftRadius: number | null
   strokeWidth: number | null
+  strokeTopWidth: number | null
+  strokeRightWidth: number | null
+  strokeBottomWidth: number | null
+  strokeLeftWidth: number | null
   strokeColor: IColorValue | null
 }
 
@@ -75,6 +79,7 @@ interface ILayoutSnapshotNode {
   nodeType: SceneNode['type']
   bounds: IBoundingBox
   visible: boolean
+  hasVisibleBox: boolean
   textContent?: string | null
   styles?: INodeStyles
   children: ILayoutSnapshotNode[]
@@ -194,11 +199,12 @@ function getCompositingStyles(node: SceneNode): ICompositingStyles | undefined {
 }
 
 function getSolidFillColor(node: SceneNode): IColorValue | null {
-  if (!('fills' in node) || !Array.isArray(node.fills) || node.fills.length === 0) {
+  const fills = node.type === 'TEXT' ? getTextStyleSource(node).fills : 'fills' in node ? node.fills : null
+  if (!Array.isArray(fills) || fills.length === 0) {
     return null
   }
 
-  const solidFill = node.fills.find(
+  const solidFill = (fills as ReadonlyArray<Paint>).find(
     fill => fill.type === 'SOLID' && fill.visible !== false
   )
 
@@ -206,43 +212,71 @@ function getSolidFillColor(node: SceneNode): IColorValue | null {
   return toRgbColor(solidFill.color)
 }
 
+type TextStyleSource = Pick<
+  TextNode,
+  'fontName' | 'fontSize' | 'fontWeight' | 'lineHeight' | 'letterSpacing' | 'fills'
+>
+
+const TEXT_STYLE_FIELDS = [
+  'fontName',
+  'fontSize',
+  'fontWeight',
+  'lineHeight',
+  'letterSpacing',
+  'fills'
+] as const
+
+// Text with mixed styles reports figma.mixed for the whole node, so fall back
+// to the segment that covers the most characters.
+function getTextStyleSource(node: TextNode): TextStyleSource {
+  const isMixed = TEXT_STYLE_FIELDS.some(field => node[field] === figma.mixed)
+  if (!isMixed) return node
+
+  const segments = node.getStyledTextSegments([...TEXT_STYLE_FIELDS])
+  if (segments.length === 0) return node
+
+  return segments.reduce((dominant, segment) =>
+    segment.end - segment.start > dominant.end - dominant.start ? segment : dominant
+  )
+}
+
 function getTypographyStyles(node: SceneNode): ITypographyStyles | undefined {
   if (node.type !== 'TEXT') return undefined
 
-  const textNode = node as TextNode
+  const source = getTextStyleSource(node)
   const fontFamily =
-    textNode.fontName !== figma.mixed &&
-    typeof textNode.fontName === 'object' &&
-    textNode.fontName &&
-    'family' in textNode.fontName
-      ? textNode.fontName.family
+    source.fontName !== figma.mixed &&
+    typeof source.fontName === 'object' &&
+    source.fontName &&
+    'family' in source.fontName
+      ? source.fontName.family
       : null
 
   const lineHeightValue =
-    typeof node.lineHeight === 'object' && 'value' in node.lineHeight
-      ? node.lineHeight.value
-      : typeof node.lineHeight === 'number'
-        ? node.lineHeight
+    typeof source.lineHeight === 'object' && 'value' in source.lineHeight
+      ? source.lineHeight.value
+      : typeof source.lineHeight === 'number'
+        ? source.lineHeight
         : null
   const lineHeightUnit =
-    typeof node.lineHeight === 'object' && 'unit' in node.lineHeight
-      ? normalizeStyleString(node.lineHeight.unit)
+    typeof source.lineHeight === 'object' && 'unit' in source.lineHeight
+      ? normalizeStyleString(source.lineHeight.unit)
       : null
   const letterSpacingValue =
-    typeof node.letterSpacing === 'object' && 'value' in node.letterSpacing
-      ? node.letterSpacing.value
-      : typeof node.letterSpacing === 'number'
-        ? node.letterSpacing
+    typeof source.letterSpacing === 'object' && 'value' in source.letterSpacing
+      ? source.letterSpacing.value
+      : typeof source.letterSpacing === 'number'
+        ? source.letterSpacing
         : null
   const letterSpacingUnit =
-    typeof node.letterSpacing === 'object' && 'unit' in node.letterSpacing
-      ? normalizeStyleString(node.letterSpacing.unit)
+    typeof source.letterSpacing === 'object' && 'unit' in source.letterSpacing
+      ? normalizeStyleString(source.letterSpacing.unit)
       : null
 
   return {
     fontFamily,
-    fontSize: typeof node.fontSize === 'number' ? node.fontSize : null,
-    fontWeight: typeof node.fontWeight === 'number' ? node.fontWeight : null,
+    fontSize: typeof source.fontSize === 'number' ? source.fontSize : null,
+    fontWeight: typeof source.fontWeight === 'number' ? source.fontWeight : null,
     lineHeight: lineHeightValue,
     lineHeightUnit,
     letterSpacing: letterSpacingValue,
@@ -289,36 +323,83 @@ function getSpacingStyles(node: SceneNode): ISpacingStyles | undefined {
   }
 }
 
+function hasVisiblePaint(paints: ReadonlyArray<Paint> | typeof figma.mixed | undefined): boolean {
+  if (!Array.isArray(paints)) return false
+  return paints.some(paint => paint.visible !== false && (paint.opacity ?? 1) > 0)
+}
+
+function hasVisibleStroke(node: SceneNode): boolean {
+  return 'strokes' in node && hasVisiblePaint(node.strokes)
+}
+
+// A node's box (and so its radius) is only visible through a fill, stroke,
+// clip, or shadow. Every frame reports cornerRadius 0 by default, and padding
+// on an invisible frame is pure spacing that code may express as margin.
+function hasVisibleBox(node: SceneNode): boolean {
+  if ('fills' in node && hasVisiblePaint(node.fills)) return true
+  if (hasVisibleStroke(node)) return true
+  if ('clipsContent' in node && node.clipsContent) return true
+  if ('effects' in node && Array.isArray(node.effects)) {
+    return node.effects.some(effect => effect.visible !== false)
+  }
+  return false
+}
+
+function getNumericProperty(node: SceneNode, key: string): number | null {
+  const value = (node as unknown as Record<string, unknown>)[key]
+  return typeof value === 'number' ? value : null
+}
+
+function getUniformValue(values: Array<number | null>): number | null {
+  const [first] = values
+  if (first == null) return null
+  return values.every(value => value === first) ? first : null
+}
+
 function getBorderStyles(node: SceneNode): IBorderStyles | undefined {
   if (!('cornerRadius' in node)) return undefined
 
-  const topLeftRadius =
-    'topLeftRadius' in node && typeof node.topLeftRadius === 'number' ? node.topLeftRadius : null
-  const topRightRadius =
-    'topRightRadius' in node && typeof node.topRightRadius === 'number'
-      ? node.topRightRadius
-      : null
-  const bottomRightRadius =
-    'bottomRightRadius' in node && typeof node.bottomRightRadius === 'number'
-      ? node.bottomRightRadius
-      : null
-  const bottomLeftRadius =
-    'bottomLeftRadius' in node && typeof node.bottomLeftRadius === 'number'
-      ? node.bottomLeftRadius
-      : null
-  const strokeWidth =
-    'strokeWeight' in node && typeof node.strokeWeight === 'number' ? node.strokeWeight : null
+  const showCorners = hasVisibleBox(node)
+  const topLeftRadius = showCorners ? getNumericProperty(node, 'topLeftRadius') : null
+  const topRightRadius = showCorners ? getNumericProperty(node, 'topRightRadius') : null
+  const bottomRightRadius = showCorners ? getNumericProperty(node, 'bottomRightRadius') : null
+  const bottomLeftRadius = showCorners ? getNumericProperty(node, 'bottomLeftRadius') : null
+  const radius = showCorners
+    ? typeof node.cornerRadius === 'number'
+      ? node.cornerRadius
+      : getUniformValue([topLeftRadius, topRightRadius, bottomRightRadius, bottomLeftRadius])
+    : null
+
+  // strokeWeight defaults to 1 even with no strokes, and becomes figma.mixed
+  // when sides differ, so read per-side weights and only for visible strokes.
+  let strokeSides: Array<number | null> = [null, null, null, null]
+  if (hasVisibleStroke(node)) {
+    const fallback = getNumericProperty(node, 'strokeWeight')
+    strokeSides = ['strokeTopWeight', 'strokeRightWeight', 'strokeBottomWeight', 'strokeLeftWeight'].map(
+      key => getNumericProperty(node, key) ?? fallback
+    )
+  }
+  const [strokeTopWidth, strokeRightWidth, strokeBottomWidth, strokeLeftWidth] = strokeSides
   const strokeColor = getSolidStrokeColor(node)
 
-  return {
-    radius: typeof node.cornerRadius === 'number' ? node.cornerRadius : null,
+  const border: IBorderStyles = {
+    radius,
     topLeftRadius,
     topRightRadius,
     bottomRightRadius,
     bottomLeftRadius,
-    strokeWidth,
+    strokeWidth: getUniformValue(strokeSides),
+    strokeTopWidth,
+    strokeRightWidth,
+    strokeBottomWidth,
+    strokeLeftWidth,
     strokeColor
   }
+
+  const hasValue = (Object.keys(border) as Array<keyof IBorderStyles>).some(
+    key => border[key] != null
+  )
+  return hasValue ? border : undefined
 }
 
 function getColorStyles(node: SceneNode): IColorStyles | undefined {
@@ -382,6 +463,7 @@ function toSnapshotNode(node: SceneNode): ILayoutSnapshotNode | null {
     nodeType: node.type,
     bounds,
     visible: node.visible,
+    hasVisibleBox: hasVisibleBox(node),
     textContent: getNodeTextContent(node),
     styles: getNodeStyles(node),
     children: []

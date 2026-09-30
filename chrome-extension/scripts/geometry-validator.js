@@ -157,14 +157,13 @@
   }
 
   function getUniformBorderColor(style) {
-    const values = [
-      cssRgbToObject(style.borderTopColor),
-      cssRgbToObject(style.borderRightColor),
-      cssRgbToObject(style.borderBottomColor),
-      cssRgbToObject(style.borderLeftColor)
-    ]
+    // Sides without a border still report a color (usually currentColor),
+    // so only the sides that actually draw a border are considered.
+    const values = ['Top', 'Right', 'Bottom', 'Left']
+      .filter(side => parseFloat(style[`border${side}Width`]) > 0)
+      .map(side => cssRgbToObject(style[`border${side}Color`]))
 
-    if (values.some(value => !value)) return null
+    if (values.length === 0 || values.some(value => !value)) return null
     const [first] = values
     return values.every(
       value => value.r === first.r && value.g === first.g && value.b === first.b
@@ -237,6 +236,22 @@
       width: rect.width,
       height: rect.height
     })
+  }
+
+  function getMarginBounds(bounds, style) {
+    const margin = side => Math.max(0, parseFloat(style[`margin${side}`]) || 0)
+    const top = margin('Top')
+    const right = margin('Right')
+    const bottom = margin('Bottom')
+    const left = margin('Left')
+    if (!top && !right && !bottom && !left) return null
+
+    return {
+      x: bounds.x - left,
+      y: bounds.y - top,
+      width: bounds.width + left + right,
+      height: bounds.height + top + bottom
+    }
   }
 
   function hasMeaningfulBackground(value) {
@@ -340,6 +355,7 @@
       hasPadding: hasPaddingValue,
       hasBackground,
       hasBorder,
+      marginBounds: getMarginBounds(bounds, style),
       isInteractive,
       isTextLike,
       visualScore,
@@ -612,6 +628,8 @@
 
   function getBrowserStyleSnapshot(element) {
     const computedStyles = window.getComputedStyle(element)
+    // Corner radii can be elliptical ("4px 8px"); parseFloat keeps the
+    // horizontal radius, which is the only one Figma models.
     const borderTopLeftRadius = normalizeCssNumber(computedStyles.borderTopLeftRadius)
     const borderTopRightRadius = normalizeCssNumber(computedStyles.borderTopRightRadius)
     const borderBottomRightRadius = normalizeCssNumber(computedStyles.borderBottomRightRadius)
@@ -638,12 +656,23 @@
         background: cssRgbToObject(computedStyles.backgroundColor)
       },
       border: {
-        radius: normalizeCssNumber(computedStyles.borderRadius),
+        // The borderRadius shorthand lists every corner when they differ, so
+        // derive the single radius from the corners instead of parsing it.
+        radius: getUniformBorderMetric([
+          borderTopLeftRadius,
+          borderTopRightRadius,
+          borderBottomRightRadius,
+          borderBottomLeftRadius
+        ]),
         topLeftRadius: borderTopLeftRadius,
         topRightRadius: borderTopRightRadius,
         bottomRightRadius: borderBottomRightRadius,
         bottomLeftRadius: borderBottomLeftRadius,
         strokeWidth: getUniformBorderMetric(borderWidths),
+        strokeTopWidth: borderWidths[0],
+        strokeRightWidth: borderWidths[1],
+        strokeBottomWidth: borderWidths[2],
+        strokeLeftWidth: borderWidths[3],
         strokeColor: getUniformBorderColor(computedStyles)
       },
       spacing: {
@@ -651,6 +680,12 @@
         paddingRight: normalizeCssNumber(computedStyles.paddingRight),
         paddingBottom: normalizeCssNumber(computedStyles.paddingBottom),
         paddingLeft: normalizeCssNumber(computedStyles.paddingLeft)
+      },
+      margin: {
+        marginTop: normalizeCssNumber(computedStyles.marginTop),
+        marginRight: normalizeCssNumber(computedStyles.marginRight),
+        marginBottom: normalizeCssNumber(computedStyles.marginBottom),
+        marginLeft: normalizeCssNumber(computedStyles.marginLeft)
       },
       compositing: {
         opacity: normalizeCssNumber(computedStyles.opacity),
@@ -662,13 +697,14 @@
     }
   }
 
-  function buildStyleComparison(figmaStyles, browserStyles) {
+  function buildStyleComparison(figmaStyles, browserStyles, options = {}) {
     if (!figmaStyles) return null
 
     const comparison = {
       figma: figmaStyles,
       browser: {},
-      diffs: {}
+      diffs: {},
+      equivalents: {}
     }
 
     function recordNumeric(groupKey, propertyKey, figmaValue, browserValue) {
@@ -782,7 +818,11 @@
         'topRightRadius',
         'bottomRightRadius',
         'bottomLeftRadius',
-        'strokeWidth'
+        'strokeWidth',
+        'strokeTopWidth',
+        'strokeRightWidth',
+        'strokeBottomWidth',
+        'strokeLeftWidth'
       ].forEach(propertyKey => {
         recordNumeric(
           'border',
@@ -800,16 +840,23 @@
     }
 
     if (figmaStyles.spacing) {
-      ;['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].forEach(
-        propertyKey => {
-          recordNumeric(
-            'spacing',
-            propertyKey,
-            figmaStyles.spacing[propertyKey],
-            browserStyles.spacing?.[propertyKey]
-          )
+      ;['Top', 'Right', 'Bottom', 'Left'].forEach(side => {
+        const propertyKey = `padding${side}`
+        const figmaValue = figmaStyles.spacing[propertyKey]
+        recordNumeric('spacing', propertyKey, figmaValue, browserStyles.spacing?.[propertyKey])
+
+        if (!options.marginEquivalent || !comparison.diffs.spacing?.[propertyKey]) return
+
+        const outerSpacing =
+          (browserStyles.spacing?.[propertyKey] ?? 0) +
+          (browserStyles.margin?.[`margin${side}`] ?? 0)
+        if (compareDimension(figmaValue, outerSpacing, 0.5)) {
+          comparison.browser.spacing[propertyKey] = outerSpacing
+          comparison.diffs.spacing[propertyKey] = false
+          if (!comparison.equivalents.spacing) comparison.equivalents.spacing = {}
+          comparison.equivalents.spacing[propertyKey] = 'margin'
         }
-      )
+      })
     }
 
     if (figmaStyles.compositing) {
@@ -851,8 +898,24 @@
   ) {
     const figmaWidth = figmaNode.bounds.width
     const figmaHeight = figmaNode.bounds.height
-    const browserWidth = browserNode?.bounds.width ?? null
-    const browserHeight = browserNode?.bounds.height ?? null
+    // Padding on an invisible Figma frame is only spacing, which code often
+    // writes as margin on an equally invisible element. Allow both.
+    const marginEquivalent =
+      mappingStatus === 'matched' &&
+      figmaNode.hasVisibleBox === false &&
+      Boolean(browserNode) &&
+      !browserNode.hasBackground &&
+      !browserNode.hasBorder
+    const countSizeMatches = bounds =>
+      Number(compareDimension(figmaWidth, bounds.width, tolerance)) +
+      Number(compareDimension(figmaHeight, bounds.height, tolerance))
+    const useMarginBox =
+      marginEquivalent &&
+      Boolean(browserNode.marginBounds) &&
+      countSizeMatches(browserNode.marginBounds) > countSizeMatches(browserNode.bounds)
+    const effectiveBrowserBounds = useMarginBox ? browserNode.marginBounds : browserNode?.bounds
+    const browserWidth = effectiveBrowserBounds?.width ?? null
+    const browserHeight = effectiveBrowserBounds?.height ?? null
     const widthMatches =
       mappingStatus === 'matched'
         ? compareDimension(figmaWidth, browserWidth, tolerance)
@@ -872,14 +935,16 @@
         width: figmaWidth,
         height: figmaHeight
       },
-      browserBounds: browserNode
+      browserBounds: effectiveBrowserBounds
         ? {
-            x: browserNode.bounds.x,
-            y: browserNode.bounds.y,
+            x: effectiveBrowserBounds.x,
+            y: effectiveBrowserBounds.y,
             width: browserWidth,
             height: browserHeight
           }
         : null,
+      browserBoxModel: useMarginBox ? 'margin' : 'border',
+      marginEquivalent,
       figma: {
         width: figmaWidth,
         height: figmaHeight
@@ -925,33 +990,89 @@
     }
   }
 
+  function collectTextDescendants(result, collected = []) {
+    result.children.forEach(child => {
+      if (child.nodeType === 'TEXT') collected.push(child)
+      collectTextDescendants(child, collected)
+    })
+    return collected
+  }
+
+  // A Figma frame that wraps a single text layer often maps to one DOM element
+  // (e.g. a <label>) while the text layer itself finds no match of its own.
+  // Borrow that text layer's typography so the frame still gets compared.
+  function getInheritedTextStyles(result, element) {
+    if (result.nodeType === 'TEXT' || result.figmaStyles?.typography) return null
+
+    const elementText = normalizeTextContent(getBrowserTextContent(element))
+    if (!elementText) return null
+
+    const candidates = collectTextDescendants(result).filter(
+      child =>
+        child.figmaStyles?.typography &&
+        normalizeTextContent(child.figmaText) === elementText
+    )
+    if (candidates.length !== 1) return null
+
+    const [source] = candidates
+    // A matched text layer already reports its own typography.
+    if (source.mappingStatus === 'matched') return null
+
+    return {
+      source,
+      typography: source.figmaStyles.typography,
+      textColor: source.figmaStyles.colors?.text ?? null
+    }
+  }
+
   function enrichStyleComparisons(validationResult, matchEntries) {
+    const elementByResult = new Map()
     let matchIndex = 0
 
-    function walk(result) {
-      const matchEntry = matchEntries[matchIndex] || null
+    ;(function indexElements(result) {
+      elementByResult.set(result, matchEntries[matchIndex]?.element || null)
       matchIndex += 1
+      result.children.forEach(child => indexElements(child))
+    })(validationResult)
 
-      if (
-        result.mappingStatus === 'matched' &&
-        result.status === 'mismatch' &&
-        matchEntry?.element &&
-        result.figmaStyles
-      ) {
-        result.styleComparison = buildStyleComparison(
-          result.figmaStyles,
-          getBrowserStyleSnapshot(matchEntry.element)
-        )
+    function walk(result) {
+      const element = elementByResult.get(result)
+
+      if (result.mappingStatus === 'matched' && element) {
+        const inherited = getInheritedTextStyles(result, element)
+        const figmaStyles = inherited
+          ? {
+              ...(result.figmaStyles || {}),
+              typography: inherited.typography,
+              ...(inherited.textColor
+                ? { colors: { ...(result.figmaStyles?.colors || {}), text: inherited.textColor } }
+                : {})
+            }
+          : result.figmaStyles
+
+        // Styles are compared for every matched node, not just geometry
+        // mismatches, so a correctly sized element with the wrong font or
+        // color is still reported.
+        if (figmaStyles) {
+          result.styleComparison = buildStyleComparison(
+            figmaStyles,
+            getBrowserStyleSnapshot(element),
+            { marginEquivalent: result.marginEquivalent }
+          )
+        }
+
+        if (inherited) {
+          result.inheritedTextStyleFrom = {
+            nodeId: inherited.source.nodeId,
+            nodeName: inherited.source.nodeName
+          }
+        }
       }
 
-      if (
-        result.mappingStatus === 'matched' &&
-        matchEntry?.element &&
-        typeof result.figmaText === 'string'
-      ) {
+      if (result.mappingStatus === 'matched' && element && typeof result.figmaText === 'string') {
         result.textComparison = buildTextComparison(
           result.figmaText,
-          getBrowserTextContent(matchEntry.element)
+          getBrowserTextContent(element)
         )
       }
 
